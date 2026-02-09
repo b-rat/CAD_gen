@@ -31,10 +31,13 @@ AI_CAD/
 ├── coffee_mug/
 │   ├── build_mug.py              # Build script (parameters + geometry + labeling)
 │   └── coffee_mug.step           # 50-face labeled coffee mug
-└── crankset/
-    ├── build_crankset.py          # Build script (parameters + geometry + labeling)
-    ├── crankset.step              # 88-face labeled crankset
-    └── crankset_named.step        # User-labeled version via STEP Labeler
+├── crankset/
+│   ├── build_crankset.py          # Build script (parameters + geometry + labeling)
+│   ├── crankset.step              # 88-face labeled crankset
+│   └── crankset_named.step        # User-labeled version via STEP Labeler
+└── disc/
+    ├── build_disc.py              # Build script (parameters + geometry + labeling)
+    └── disc.step                  # 36-face labeled 5-spoke disc
 ```
 
 ## Geometry: blkarc_slot
@@ -166,6 +169,51 @@ A coffee mug with bulging body, hollowed cavity, handle, and full-round rim. 50 
 | `handle.side_pos` / `handle.side_neg` | 1 each | Handle flat side faces (Y=±9) |
 | `rim` | 2 | Full-round rim (outer + inner toroidal halves) |
 
+## Geometry: disc
+
+A 5-spoke disc with tapered profile, concave bottom recess, and center bore. 36 faces total. Built from hand sketches — the first part designed from sketch-to-geometry translation rather than verbal instructions alone.
+
+### Key Parameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Disc diameter | 200mm | Cylindrical stock |
+| Disc height | 20mm | Z=0 (bottom) to Z=20 (top) |
+| Top flat | φ10mm | Preserved at Z=20 |
+| Bottom flat | φ20mm | Preserved at Z=0 |
+| Shelf width | 10mm | Flat annular band at outer rim, both top (Z=3) and bottom (Z=0) |
+| Rim height | 3mm | Outer cylindrical wall, Z=0 to Z=3 |
+| Top taper | Cone | (R=5, Z=20) → (R=90, Z=3) |
+| Bottom taper | Concave cone | (R=10, Z=13) → (R=90, Z=0), 7mm gap from top at center |
+| Recess wall | Cylinder R=10 | Vertical inner wall of bottom conical recess |
+| Hub diameter | 30mm | Central hub, R=0 to R=15 |
+| Spoke width | 10mm | 5 parallel-edge arms (constant width, not radial) |
+| Center bore | φ5mm | Through-hole |
+
+### Build Order (in build_disc.py)
+
+1. Stock cylinder (φ200 × 20mm)
+2. Top taper cut (trapezoid revolved: cone + shelf at Z=3)
+3. Bottom concave conical recess (triangle revolved: cone from R=10 to R=90)
+4. Window cutouts (annular ring minus 5 spoke bars, through rim)
+5. Center bore (φ5mm through-hole, last to avoid fill-in)
+
+### Named Faces
+
+| Label Pattern | Count | Description |
+|--------------|-------|-------------|
+| `top` | 1 | Center flat at Z=20, φ10mm |
+| `top_taper` | 1 | Conical surface, Z=20 at R=5 → Z=3 at R=90 |
+| `top_shelf_NN` | 5 | Flat annular segments at Z=3, one per spoke |
+| `rim_NN` | 5 | Outer cylindrical segments at R=100, 3mm tall |
+| `bottom_shelf_NN` | 5 | Flat annular segments at Z=0, one per spoke |
+| `bottom_taper` | 1 | Concave conical recess, Z=13 at R=10 → Z=0 at R=90 |
+| `recess_wall` | 1 | Cylinder at R=10, inner wall of bottom recess |
+| `bottom` | 1 | Center flat at Z=0, φ20mm |
+| `hub_NN` | 5 | Hub arcs at R=15, one per window |
+| `spoke_NN.left/right` | 10 | Spoke side faces (planar, vertical) |
+| `bore` | 1 | Center bore cylinder at R=2.5 |
+
 ### STEP Naming Convention
 
 Faces use dot-separated `feature.sub_face` naming:
@@ -293,6 +341,18 @@ CAD edit instructions from users tend to hit a few predictable ambiguity categor
 **Face labels as shared vocabulary.** Once a part has labeled faces, ambiguity resolution becomes much more precise. Instead of "the edge between the bore and the top face," the user (or Claude) can say "the edge between `bore.wall` and `top`" or "the edge where `channel.bottom.floor` meets `channel.bottom.wall_lower`." This turns vague geometric references into exact topological references that map directly to OCC entities.
 
 **Resolution strategy**: When an instruction is ambiguous, ask targeted clarifying questions that reference specific face labels. One or two questions typically resolve the ambiguity completely. For example: "Should the chamfer go on the edge between `top` and `cylinder`, or between `top` and `bore.wall`?"
+
+**Designing from sketches: words define geometry, sketch verifies.** Hand-drawn sketches are useful for communicating overall shape and spatial relationships, but they are unreliable as the sole source of precise dimensions and feature definitions. Sketches often have missing dimensions, ambiguous datum references, and spatial relationships that can be interpreted multiple ways. The most effective workflow:
+
+1. **User provides a verbal description with dimensions** referencing labeled surfaces/datums (e.g., "3mm rim from Z=0 to Z=3, 10mm flat shelf at outer edge, conical taper from R=5 at Z=20 down to R=90 at Z=3").
+2. **Sketch serves as verification** — after geometry is built, compare the rendered result against the sketch to catch misunderstandings.
+3. **Iterate on specific discrepancies** using face labels as shared vocabulary (e.g., "the `bottom_taper` should end 7mm from the `top` face near the Z axis").
+
+Common sketch interpretation failures:
+- **Dimension between far points**: A dimension line spanning the full part height may indicate total height, remaining height, or a gap — without explicit datum callouts, any interpretation is a guess.
+- **Implicit vs explicit features**: A shelf visible in a profile sketch may not be dimensioned at all, requiring the user to call it out verbally.
+- **Reference direction**: "7mm" could mean 7mm up from bottom, 7mm down from top, or 7mm gap between two features — the sketch alone doesn't disambiguate.
+- **Diameter vs radius confusion**: Sketch labels like "φ10" are clear, but unlabeled circles or arcs invite misreading.
 
 ### Re-labeling faces
 Run STEP Labeler: `cd ../steplabeler && python app.py ../AI_CAD/blkarc_slot-Body.step`
@@ -537,3 +597,69 @@ Final output: `coffee_mug/coffee_mug.step` (50 labeled faces) + `coffee_mug/buil
 | Handle cylinder faces unlabeled after rounded cross-section | Y span changed from ±9 to ±5 (hw - fillet_r) | Updated classifier to use `handle_half_width - handle_fillet_r` |
 | Handle corner arcs classified as body.bulge | SurfaceOfRevolution with narrow Y band not distinguished from body | Added Y-span check: narrow band → handle, full span → body |
 | Junction fillet faces classified as body.bulge | BSplineSurface fillet patches near body surface (cx < bulge_r) | Added Y-span check in BSplineSurface classifier → handle.fillet |
+
+---
+
+## Session Log: Disc Build
+
+Fourth session — first attempt at sketch-to-geometry translation, where the user provided hand-drawn sketches as the primary design input rather than verbal instructions.
+
+### What was built
+
+**5-spoke disc** (built from scratch iteratively from hand sketches):
+1. Stock cylinder (φ200 × 20mm) → 3 faces
+2. Top taper cut (trapezoid revolved: cone from R=5→R=90 + shelf at Z=3) → ~7 faces
+3. Bottom concave conical recess (triangle revolved: R=10→R=90, apex at Z=13) → ~11 faces
+4. 5-spoke window cutouts (annular ring minus bars, through rim) → ~35 faces
+5. Center bore (φ5mm through-hole) → 36 faces
+
+Final output: `disc/disc.step` (36 labeled faces) + `disc/build_disc.py` (persistent build script)
+
+### What worked
+
+**Machinist approach scaled to a new part type.** The stock-then-subtract pattern (cylinder → revolved taper cuts → window cuts → bore) produced clean geometry on the first successful iteration. Each feature was an independent cut.
+
+**Revolved cross-section profiles for tapered surfaces.** Both the top taper (trapezoid: cone + shelf) and bottom recess (triangle: cone only) were built as 2D profiles on the XZ plane, then `.revolve(360)`. This gave exact control over the profile shape without computing intersection curves manually.
+
+**One-sided spoke bars.** Using `.center(bar_length/2, 0).rect(bar_length, spoke_width)` creates a rectangle from center to beyond the rim on one side only. This correctly produces 5 arms, unlike full-diameter bars which create 10.
+
+**Angular face classification.** Using `math.atan2(cy, cx)` to compute centroid angle, then `round(angle / spoke_angle_deg)` to assign spoke/hub/shelf indices, worked cleanly for all 5-fold symmetric features.
+
+**Section cut renders for internal verification.** The `--section` flag on render_step.py was essential for verifying the taper profiles, shelf heights, and recess geometry that are invisible from external views.
+
+### What didn't work
+
+**Sketch interpretation took 4+ iterations.** The hand-drawn sketches had missing dimensions, ambiguous datum references, and features that could be interpreted multiple ways. Key misinterpretations:
+
+1. **φ12mm vs φ10mm**: Misread the top flat diameter from the sketch. Required user correction.
+2. **"17mm" interpreted as rim height**: The 17mm dimension was ambiguous — could be total remaining height, rim height, or something else. The rim is actually 3mm.
+3. **Missing top shelf**: The first profile interpretation had no annular shelf on top, only a direct taper to the rim. User had to explicitly call out "there needs to be an annular surface on top as well."
+4. **Bottom face raised to Z=7**: Interpreted the bottom conical recess as removing material from center, raising the bottom face. User clarified: "The first set of revolved cuts should have resulted in the bottom face being at the XY plane."
+5. **7mm = cone height from Z=0 (wrong)**: Interpreted 7mm as the height of the cone above the bottom face. User clarified: "the bottom_taper should end 7mm from the top surface near the z axis" — meaning `cone_peak_z = 20 - 7 = 13`.
+
+**10 arms instead of 5.** Full-diameter rectangular bars (`rect(2*disc_radius, spoke_width)`) created arms on both sides of center. Fixed by using one-sided bars from center outward.
+
+**Cone classifier boundary wrong.** With the initial `cone_height=7`, both cone centroids fell below `disc_height/2`, so both got the same label. Required adjusting the classification boundary.
+
+### Key finding: sketch-to-geometry workflow
+
+**Sketches alone are insufficient for precise geometry.** Hand-drawn sketches communicate shape intent but fail at:
+- Unambiguous dimensioning (which datum does "17mm" reference?)
+- Implicit features (shelves, flats that are visible but not called out)
+- Direction of measurement (7mm from top vs 7mm from bottom)
+
+**The effective workflow is: words define geometry, sketch verifies.** The user provides explicit verbal descriptions with dimensions referenced to labeled surfaces/datums. The sketch serves as a cross-check after geometry is built, not as the primary specification. This was the key methodological finding of this session.
+
+### Errors encountered and resolved
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| φ12mm top flat instead of φ10mm | Misread sketch dimension | User corrected; updated `top_flat_dia = 10.0` |
+| 17mm interpreted as rim height | Ambiguous sketch dimension, no datum reference | User clarified rim = 3mm; `rim_height = 3.0` |
+| No top shelf | Feature visible in sketch but not dimensioned/called out | User explicitly requested; changed top cut from triangle to trapezoid |
+| Bottom face at Z=7 instead of Z=0 | Interpreted recess as removing center material | Changed bottom cut from trapezoid (starting at R=0) to triangle (starting at R=10), preserving center at Z=0 |
+| 7mm = cone height from Z=0 | Ambiguous dimension direction | User clarified: gap from top surface; `cone_peak_z = disc_height - 7 = 13` |
+| 10 arms instead of 5 | Full-diameter bars create bilateral arms | One-sided bars: `.center(bar_length/2, 0)` |
+| Both cones classified as same label | Both centroids below disc_height/2 | Adjusted classifier boundary based on actual centroid Z values |
+| R=10 recess wall unclassified | New cylindrical face appeared after geometry change | Added `abs(r - bot_flat_r) < 0.1` → `"recess_wall"` |
+| Bottom face vs bottom shelf at same Z=0 | Both are planar at Z=0, differ only in radial position | Added `math.hypot(cx, cy) < bot_flat_r + 1` to distinguish center from spoke shelves |
