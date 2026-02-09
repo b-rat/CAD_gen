@@ -248,6 +248,45 @@ Run STEP Labeler: `cd ../steplabeler && python app.py ../AI_CAD/blkarc_slot-Body
 - **CadQuery** (`pip install cadquery`): Programmatic CAD geometry generation via Python. Used for rebuilding geometry when topology changes.
 - **STEP Labeler** (`../steplabeler/`): Face labeling web UI for manual/visual labeling
 - **OCC (via CadQuery)**: `BRepGProp` for face centroids/areas, `BRepAdaptor_Surface` for surface type detection, `GeomAbs_*` for type classification
+- **render_step.py**: PyVista-based offscreen renderer for visual verification (see below)
+
+### Visual verification with render_step.py
+
+After building or modifying geometry, **render and inspect the result** before moving on. This closes the visual feedback loop — Claude can see the geometry via PNG instead of relying solely on face counts and user verification.
+
+```bash
+# Render from STEP file (4 views: iso, front, back, top)
+python render_step.py crankset/crankset.step
+
+# Add section cut (5th view, Y=0 by default)
+python render_step.py crankset/crankset.step --section
+
+# Render directly from build script (no STEP export needed)
+python render_step.py --cq crankset/build_crankset.py --section
+
+# Override cameras (inline JSON or file)
+python render_step.py part.step --camera '{"iso": {"direction": [1,0.5,-0.4]}, "section": {"normal": [1,0,0]}}'
+python render_step.py part.step --camera views.json
+```
+
+**Camera JSON format** — all fields optional, merged with defaults:
+```json
+{
+    "iso":     {"direction": [1, 1, -0.6], "up": [0, 0, 1], "zoom": 0.85},
+    "front":   {"direction": [0, 1, 0]},
+    "section": {"direction": [0, 1, 0], "normal": [0, 1, 0], "origin": [0, 0, 0]}
+}
+```
+
+**When to render:**
+- After each new feature (boolean cut, union, fillet) to verify shape
+- After build order changes (cuts moving before/after unions)
+- When internal features matter (bores, tapers, pockets) — use `--section`
+- Before asking the user to visually verify — catch obvious errors yourself first
+
+**Section cuts are the highest-value view.** Most geometry bugs during the crankset build (hub turn-down cutting through spider, union filling bore, bore not reaching arm top) were invisible from the outside but immediately obvious in cross-section.
+
+Requires: `pip install pyvista cadquery` (PyVista 0.44.x with VTK 9.3.x for CadQuery compatibility)
 
 ---
 
