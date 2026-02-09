@@ -28,6 +28,9 @@ AI_CAD/
 ├── cylinder/
 │   ├── build_cylinder.py          # Build script (parameters + geometry + labeling)
 │   └── cylinder.step              # 66-face labeled cylinder
+├── coffee_mug/
+│   ├── build_mug.py              # Build script (parameters + geometry + labeling)
+│   └── coffee_mug.step           # 50-face labeled coffee mug
 └── crankset/
     ├── build_crankset.py          # Build script (parameters + geometry + labeling)
     ├── crankset.step              # 88-face labeled crankset
@@ -116,6 +119,52 @@ A track bike drive-side crank — 5-arm spider with integrated crank arm, single
 | `pedal.face` / `pedal.back` / `pedal.boss` / `pedal.bore` | 1 each | Pedal boss features |
 | `fillet` | 6 | Toroidal fillet faces (arm + hub boss) |
 | `front` / `back` | 1/5 | Major planar faces |
+
+## Geometry: coffee_mug
+
+A coffee mug with bulging body, hollowed cavity, handle, and full-round rim. 50 faces total. Built iteratively — body of revolution, handle via sweep, junction fillets.
+
+### Key Parameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Bottom diameter | 95mm | Cylindrical band, 9mm tall |
+| Top diameter | 81.6mm | Cylindrical band, 9mm tall |
+| Height | 107mm | Bottom on XY plane, axis along Z |
+| Wall thickness | 5mm | Floor at Z=5, open top |
+| Bulge max diameter | 100mm | At Z=50, arc cross-section |
+| Handle center X | 65mm | From Z axis |
+| Handle center Z | 80mm | Main arc center height |
+| Handle main radius | 15mm | Main arc |
+| Handle transition radius | 100mm | Tangent arcs to body at Z=20 and Z=87 |
+| Handle cross-section | 18mm wide x 10mm thick | Rounded rectangle, 4mm corner radii |
+| Rim | Full round | 2.5mm radius (wall_thickness / 2) |
+| Handle-body fillet | 4mm | On union seam edges |
+
+### Build Order (in build_mug.py)
+
+1. Outer body (revolved profile: cylindrical bands + bulge arc + full-round rim cap)
+2. Handle via sweep (rounded rectangle cross-section along 3-arc centerline path)
+3. Union handle with body
+4. Cut cavity (revolved inner profile with matching rim cap, extends above to open top)
+5. Fillet handle-body junction edges (4mm, custom edge selector)
+
+### Named Faces
+
+| Label Pattern | Count | Description |
+|--------------|-------|-------------|
+| `body.bottom_cyl` | 1 | Outer bottom cylindrical band |
+| `body.bulge` | 1 | Outer bulge surface (SurfaceOfRevolution) |
+| `body.top_cyl` | 1 | Outer top cylindrical band |
+| `bottom` | 1 | Bottom face (Z=0 plane) |
+| `cavity.bottom_cyl` | 1 | Inner bottom cylindrical wall |
+| `cavity.bulge` | 1 | Inner bulge surface |
+| `cavity.floor` | 1 | Interior floor (Z=5) |
+| `cavity.top_cyl` | 1 | Inner top cylindrical wall |
+| `handle` | 22 | Handle swept surfaces (flat sides + corner arcs) |
+| `handle.fillet` | 16 | Handle-body junction fillet surfaces (BSpline) |
+| `handle.side_pos` / `handle.side_neg` | 1 each | Handle flat side faces (Y=±9) |
+| `rim` | 2 | Full-round rim (outer + inner toroidal halves) |
 
 ### STEP Naming Convention
 
@@ -225,6 +274,12 @@ for face in result2.faces().vals():
 - **CadQuery loft produces BSplineSurface, not Plane.** A loft between two square profiles (e.g., for a square taper) creates BSpline faces even though the result is geometrically planar. The face classifier must handle `GeomAbs_BSplineSurface` for these cases.
 - **Annular cuts must be Z-limited to avoid cutting through spider webs.** When turning down a hub boss that's embedded in a spider structure, a full-height annular cut removes the spider web material between the tapers. Split the cut into segments that only cover where the boss actually protrudes beyond the taper surfaces.
 - **Compute taper intersection Z before writing cuts.** For a conical taper at slope m meeting a cylinder at radius r, calculate the exact Z where they meet. Don't estimate — use the geometry: `Z_taper(r) = Z_vertex - m * (r - r_vertex)`. This avoids trial-and-error cuts that clip adjacent features.
+- **Extrusion-based handle union can silently fail.** Extruding a 2D arc profile and unioning it to a revolved body may produce a COMPOUND instead of a fused SOLID — `union()` returns the original body unchanged. CadQuery's `.sweep()` along a centerline path works where extrusion fails. Sweep also avoids the twist artifacts that extrusion of arc profiles can produce.
+- **Full rounds via revolved profile, not fillet API.** A full round on a rim (fillet radius = wall_thickness / 2) can be built directly into the revolved cross-section as quarter-circle arcs on both the outer body and cavity profiles. Both arcs share the same center point (midwall, height - rim_r), creating a perfect semicircular rim. This avoids the fillet API entirely.
+- **Fillets on union seam edges CAN work for smooth geometry.** The crankset found that fillets on union seam edges always fail (BRep_API: command not done). However, the coffee mug (smooth surface of revolution + swept solid) successfully filleted union seam edges at 4mm. The difference appears to be geometry complexity — smooth curved intersections succeed where angular/multi-feature intersections fail. Always try the fillet; don't assume it will fail.
+- **Rounded cross-section sweep avoids fillet API for handle edges.** Instead of sweeping a sharp rectangle and filleting edges afterward, sweep a rounded rectangle (rectangle with corner arcs) built from `lineTo` + `threePointArc` segments. This produces the same visual result with no fillet API calls and no fragment risk from pre-union filleting.
+- **Handle face classifier must adapt to cross-section shape.** A sharp rectangular sweep produces cylinder faces with Y span = ±handle_half_width. A rounded rectangle sweep produces cylinder faces with Y span = ±(handle_half_width - fillet_r) for the flat portions, plus SurfaceOfRevolution faces with narrow Y bands (fillet_r wide) for the corners. The Y span is the primary discriminator — body cylinders (full revolutions) have Y spans equal to their diameter, while handle faces are always within handle width.
+- **Handle geometry has coupled parameters.** Moving the handle arc center closer to the body (reducing handle_main_cx) can cause the top attachment point to fall inside the main arc circle, making transition arc geometry impossible (no real solution). When adjusting one handle parameter, check that the attachment points remain outside the main arc: `distance(attachment_pt, arc_center) > arc_radius`.
 
 ### Interpreting CAD instructions and resolving ambiguity
 
@@ -418,3 +473,67 @@ Final output: `crankset/crankset.step` (88 labeled faces) + `crankset/build_cran
 | Square taper faces classified as "?" | Loft created BSplineSurface, not GeomAbs_Plane | Added BSplineSurface case to classifier |
 | Axle bore not tall enough | Crank arm curves to Z≈22 at bore location, bore stopped at Z=22 | Extended bore to Z=32 (pedal_boss_z_face + 2) |
 | Changing hub_od from 40→30 broke spider fillets | 5mm fillet too large for new 30mm hub geometry | Keep hub_od=40, add separate turn-down cut instead |
+
+---
+
+## Session Log: Coffee Mug Build
+
+Third extended session — building a consumer product (coffee mug) with curved handle geometry, demonstrating sweep-based construction and successful union seam fillets.
+
+### What was built
+
+**Coffee mug** (built from scratch iteratively):
+1. Solid body of revolution (cylindrical bands + conical taper) → 5 faces
+2. Bulge arc on body (threePointArc replacing cone) → 5 faces
+3. Cavity hollowing (5mm wall, open top) → 9 faces
+4. Handle via sweep (rounded rectangle cross-section along 3-arc path) → 18 faces (after union + cavity)
+5. Full-round rim (built into revolved profiles) → +2 faces
+6. Handle-body junction fillets (4mm) → 50 faces
+
+Final output: `coffee_mug/coffee_mug.step` (50 labeled faces) + `coffee_mug/build_mug.py` (persistent build script)
+
+### What worked
+
+**Sweep for handle construction.** CadQuery's `.sweep()` along a centerline path with a rectangular cross-section produced a clean solid that unioned successfully with the revolved body. Extrusion of the same profile failed silently (produced COMPOUND instead of fused SOLID).
+
+**Rounded cross-section instead of post-sweep fillets.** Instead of sweeping a sharp rectangle and filleting edges afterward, the cross-section was drawn as a rounded rectangle (lines + arcs). This avoids the fillet API entirely for handle edge rounding and eliminates the risk of fillet-on-curved-body fragment faces.
+
+**Full round via profile modification.** The rim full round (r = wall_thickness/2) was built directly into both the outer body and cavity revolved profiles as quarter-circle arcs sharing the same center point. No fillet API needed.
+
+**Union seam fillets succeeded.** The 4mm fillet on handle-body junction edges (union seam edges) worked — contradicting the crankset finding that "fillets on union seam edges always fail." The key difference: the mug has smooth curved surfaces (surface of revolution + swept solid) vs the crankset's angular multi-feature geometry. OCCT's fillet kernel handles smooth intersections better.
+
+**Custom edge selector for junction fillets.** A CadQuery Selector subclass (`HandleJunctionSelector`) identified junction edges by checking: Y span within handle width, Z near attachment heights, X near body outer radius. This was more reliable than BoxSelector for finding the specific intersection edges.
+
+**Parameter changes as one-line edits.** Adjusting handle size (cx from 70→65→60, radius from 19→15), fillet radius (2→4mm), and other dimensions required only parameter changes — the build script re-ran cleanly each time.
+
+### What didn't work
+
+**Extrusion-based handle union failed silently.** A 2D handle profile (outer + inner edges) extruded ±9mm from XZ plane created a valid 10-face solid. But `outer.union(handle)` returned the original body unchanged — OCC's `BRepAlgoAPI_Fuse` produced a COMPOUND rather than a single SOLID. `BRepAlgoAPI_Common` confirmed the solids did intersect. A simple box union worked fine. Root cause appears to be OCCT's boolean kernel failing on the intersection of extruded arc surfaces with the revolved body surface.
+
+**Fillet API failed for rim full round.** Attempting `.edges(BoxSelector(...)).fillet(wall_thickness/2)` on the two circular rim edges failed with "BRep_API: command not done." This was expected (union seam-adjacent edges) and was solved by building the round into the profile.
+
+**Handle parameter coupling.** Reducing `handle_main_cx` from 70 to 60 caused the top attachment point (44.2, 87.0) to fall inside the main arc circle (center 60, radius 19, distance 17.3 < 19). No transition arc of any radius or tangency type can connect a point inside a circle to the circle. Required also reducing `handle_main_r` from 19 to 15.
+
+**Face classifier needed repeated updates.** Each geometry change (sharp→rounded cross-section, adding fillets) changed the surface types and bounding boxes of handle faces. The Y-span discriminator proved most robust across changes — body surfaces of revolution span their full diameter, while handle faces span only the handle width.
+
+### Key patterns established
+
+| Pattern | When to use |
+|---------|------------|
+| Sweep along centerline path | Handle-like features attached to curved bodies (extrusion may fail) |
+| Rounded cross-section sweep | Need fillets on swept solid edges without fillet API |
+| Profile-embedded full round | Full round on rim/lip of revolved body |
+| Custom Selector subclass | Edge selection for fillets when position-based filtering is needed |
+| Y-span face discriminator | Distinguishing handle faces from body faces on surface of revolution |
+| Try union seam fillets first | Smooth geometry may succeed where angular geometry fails |
+
+### Errors encountered and resolved
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| Handle extrusion union returned original body | OCCT boolean kernel fails on extruded arc ∩ revolved body | Switched to `.sweep()` along centerline path |
+| Rim fillet failed (BRep_API: command not done) | Fillet on edges adjacent to union seams | Built full round into revolved profile (quarter-circle arcs) |
+| Handle cx=60 → "No real solution for transition center" | Top attachment point inside main arc circle (d=17.3 < r=19) | Reduced handle_main_r from 19 to 15 |
+| Handle cylinder faces unlabeled after rounded cross-section | Y span changed from ±9 to ±5 (hw - fillet_r) | Updated classifier to use `handle_half_width - handle_fillet_r` |
+| Handle corner arcs classified as body.bulge | SurfaceOfRevolution with narrow Y band not distinguished from body | Added Y-span check: narrow band → handle, full span → body |
+| Junction fillet faces classified as body.bulge | BSplineSurface fillet patches near body surface (cx < bulge_r) | Added Y-span check in BSplineSurface classifier → handle.fillet |
