@@ -51,7 +51,7 @@ channel_fillet_r = 0.1  # fillet on floor-wall edges
 ch_bot_z = channel_offset                              # 10.0
 ch_top_z = cyl_height - channel_offset - channel_width  # 38.5
 
-OUTPUT_PATH = "/Users/brianratliff/machine_learning/AI_CAD/cylinder.step"
+OUTPUT_PATH = "/Users/brianratliff/machine_learning/AI_CAD/cylinder/cylinder.step"
 
 
 # ============================================================

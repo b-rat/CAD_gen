@@ -146,6 +146,7 @@ for face in result2.faces().vals():
 - **STEP continuation lines** (lines starting with whitespace) must be joined to their parent entity before parsing. Join them before building the entity map.
 - **Boolean operations can split faces unexpectedly.** A through bore that meets spline teeth at the same radius removes the bore floor and creates small root faces at the transition Z. Count faces after each boolean to verify.
 - **Ellipse semi-axes for plane-cylinder intersections** depend only on the angle between the plane and cylinder axis, not the plane's position: `semi_major = R / cos(θ)`, `semi_minor = R`. Moving a plane parallel to itself doesn't change these.
+- **Boolean cuts hang when a cut tool surface is tangent to an existing surface.** For example, cutting a window with an inner arc at exactly `hub_od_r` where the hub cylinder also lives creates a tangent condition that causes OCCT's boolean kernel to hang indefinitely. Fix: offset the cut tool surface slightly outside (e.g., `hub_od_r + 0.5`) so it intersects rather than osculates the existing surface, leaving the original feature protruding slightly. Then clean up with a separate annular cut to restore the original cylinder. This avoids tangency while producing clean geometry.
 
 ### Interpreting CAD instructions and resolving ambiguity
 
