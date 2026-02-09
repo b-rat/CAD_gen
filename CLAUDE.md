@@ -15,16 +15,24 @@ FreeCAD → STEP export → STEP Labeler (../steplabeler/) → Named STEP → Gr
 - **STEP Labeler** (`../steplabeler/`): Web app for visually selecting and naming faces on STEP files
 - **Graph_CAD** (`../Graph_CAD/Graph_CAD/`): Graph Autoencoder + LLM project that uses labeled STEP files for training
 
-## File Contents
+## Folder Structure
 
-| File | Description |
-|------|-------------|
-| `blkarc_slot.FCStd` | FreeCAD native project file (block with arc-shaped top and slot) |
-| `blkarc_slot-Body.step` | STEP export with unnamed faces |
-| `blkarc_slot-Body_named.step` | STEP export with semantically labeled faces (modified: 7mm slot width, 10° angle, deepened 7mm) |
-| `build_cylinder.py` | Persistent build script for cylinder part (parameters + geometry + labeling) |
-| `cylinder.step` | 66-face labeled cylinder: spline bore, chamfers, channels, fillets |
-| `*.FCBak` | FreeCAD auto-backup files |
+```
+AI_CAD/
+├── CLAUDE.md
+├── blkarc_slot/
+│   ├── blkarc_slot.FCStd          # FreeCAD native project
+│   ├── blkarc_slot.FCBak          # FreeCAD auto-backup
+│   ├── blkarc_slot-Body.step      # STEP export, unnamed faces
+│   └── blkarc_slot-Body_named.step # STEP export, labeled faces (7mm slot, 10° angle)
+├── cylinder/
+│   ├── build_cylinder.py          # Build script (parameters + geometry + labeling)
+│   └── cylinder.step              # 66-face labeled cylinder
+└── crankset/
+    ├── build_crankset.py          # Build script (parameters + geometry + labeling)
+    ├── crankset.step              # 88-face labeled crankset
+    └── crankset_named.step        # User-labeled version via STEP Labeler
+```
 
 ## Geometry: blkarc_slot
 
@@ -44,6 +52,70 @@ A rectangular block (100mm x 50mm) with an arc-shaped top surface (R=100mm cylin
 | `slot.planar_1` | Planar | Slot wall (triangular face) |
 | `slot.planar_2` | Planar | Slot wall (hexagonal face) |
 | `slot.planar_3` | Planar | Slot wall (triangular face) |
+
+## Geometry: crankset
+
+A track bike drive-side crank — 5-arm spider with integrated crank arm, single piece. 88 faces total. Built iteratively via conversational instructions using the machinist approach (start from stock, subtract material).
+
+### Key Parameters
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| BCD | 144mm | Track standard, 5-bolt |
+| Spider OD | 160mm | |
+| Hub OD | 40mm (turned to 30mm boss) | Axle interface area |
+| Hub height | 20mm | Z=0 (back) to Z=20 (front/chainring side) |
+| Spider thickness | 3mm | Lenticular profile, thick at hub, thin at rim |
+| Crank arm length | 165mm | Center-to-center, spindle to pedal |
+| Crank arm | 24mm wide, 10mm thick | Curved arc from spider to pedal boss |
+| Pedal boss | 27mm dia, 10mm thick | |
+| Axle bore | 20mm dia, 5mm deep blind hole | From front face |
+| Square taper | JIS, 12.65mm across flats, 2°/side | Wide end at back |
+| Bolt holes | 5x 10mm through, 12mm x 1mm counterbore | On 144mm BCD |
+| Chainring pocket | Floor at Z=3, ID at r=64mm | |
+| Pedal bore | 12.59mm (9/16"-20 minor dia) | Through all bodies |
+
+### Build Order (in build_crankset.py)
+
+1. Stock cylinder (spider OD x hub height)
+2. Back-side revolved triangular cut (conical back taper)
+3. Front-side revolved triangular cut (conical front taper, 3mm spider thickness)
+4. Chainring pocket (annular shelf)
+5. Arm window cuts (5 windows, inner_r = hub_od_r + 0.5 to avoid tangent boolean)
+5b. Spider inner corner fillets (5mm, at window/hub junction)
+5c. Hub shortening (back face moved to Z=5)
+5d. Hub boss turn-down (40mm → 30mm, back side only)
+5d2. Hub boss edge fillets (3mm, both Z=5 and Z=12 edges)
+6. Pedal boss union
+8. Bolt holes + counterbores
+7. Crank arm union (with 4mm pre-union fillets on long edges)
+9. Pedal bore (after arm union to cut through all bodies)
+5e. Axle bore (after all unions so arm doesn't fill it back in)
+5f. JIS square taper bore (loft between wide and narrow square profiles)
+
+### Named Faces
+
+| Label Pattern | Count | Description |
+|--------------|-------|-------------|
+| `spider.back_taper` | 1 | Conical back surface |
+| `spider.front_taper` | 1 | Conical front surface |
+| `spider.rim` | 5 | Outer cylindrical rim segments |
+| `spider.fillet_NN` | 10 | Inner corner fillets (2 per arm) |
+| `chainring.pocket_floor` | 5 | Pocket floor segments |
+| `chainring.pocket_id` | 5 | Pocket inner diameter wall |
+| `hub.boss` | 1 | Turned-down 30mm cylindrical surface |
+| `axle.bore_wall` | 1 | 20mm blind bore cylinder |
+| `axle.bore_floor` | 1 | Blind bore floor |
+| `axle.taper_xp/xn/yp/yn` | 4 | Square taper walls |
+| `bolt.hole_NN` | 5 | Through-holes on BCD |
+| `bolt.cbore_NN` | 5 | Counterbore cylinders |
+| `bolt.cbore_floor_NN` | 5 | Counterbore floor faces |
+| `arm.top` / `arm.bottom` | 3/1 | Crank arm curved surfaces |
+| `arm.side_left` / `arm.side_right` | 2/2 | Crank arm side faces |
+| `arm.root_NN` | ~5 | Hub/window junction arcs |
+| `pedal.face` / `pedal.back` / `pedal.boss` / `pedal.bore` | 1 each | Pedal boss features |
+| `fillet` | 6 | Toroidal fillet faces (arm + hub boss) |
+| `front` / `back` | 1/5 | Major planar faces |
 
 ### STEP Naming Convention
 
@@ -147,6 +219,12 @@ for face in result2.faces().vals():
 - **Boolean operations can split faces unexpectedly.** A through bore that meets spline teeth at the same radius removes the bore floor and creates small root faces at the transition Z. Count faces after each boolean to verify.
 - **Ellipse semi-axes for plane-cylinder intersections** depend only on the angle between the plane and cylinder axis, not the plane's position: `semi_major = R / cos(θ)`, `semi_minor = R`. Moving a plane parallel to itself doesn't change these.
 - **Boolean cuts hang when a cut tool surface is tangent to an existing surface.** For example, cutting a window with an inner arc at exactly `hub_od_r` where the hub cylinder also lives creates a tangent condition that causes OCCT's boolean kernel to hang indefinitely. Fix: offset the cut tool surface slightly outside (e.g., `hub_od_r + 0.5`) so it intersects rather than osculates the existing surface, leaving the original feature protruding slightly. Then clean up with a separate annular cut to restore the original cylinder. This avoids tangency while producing clean geometry.
+- **Union operations fill in previously-cut voids.** If you cut a bore, then union a solid that overlaps the bore, the union fills it back in. All cuts through shared volumes must go **after** all unions. This applies to any central bore/taper when a crank arm or similar feature passes through the same region.
+- **Fillets fail on edges created by boolean unions (BRep_API: command not done).** Even 1mm fillets fail on union seam edges. **Workaround**: fillet the standalone solid BEFORE unioning it to the main body. This works for simple fillets (e.g., rounding arm edges) but not for the intersection curve itself.
+- **Filleting curved bodies before union creates excessive fragment faces.** Filleting a cylinder (e.g., pedal boss) before unioning it to another curved body can produce 100+ tiny fragment faces from the boolean intersection of the fillet torus with the other body. No clean workaround in CadQuery — accept the limitation or skip the fillet.
+- **CadQuery loft produces BSplineSurface, not Plane.** A loft between two square profiles (e.g., for a square taper) creates BSpline faces even though the result is geometrically planar. The face classifier must handle `GeomAbs_BSplineSurface` for these cases.
+- **Annular cuts must be Z-limited to avoid cutting through spider webs.** When turning down a hub boss that's embedded in a spider structure, a full-height annular cut removes the spider web material between the tapers. Split the cut into segments that only cover where the boss actually protrudes beyond the taper surfaces.
+- **Compute taper intersection Z before writing cuts.** For a conical taper at slope m meeting a cylinder at radius r, calculate the exact Z where they meet. Don't estimate — use the geometry: `Z_taper(r) = Z_vertex - m * (r - r_vertex)`. This avoids trial-and-error cuts that clip adjacent features.
 
 ### Interpreting CAD instructions and resolving ambiguity
 
@@ -231,3 +309,73 @@ The remaining ~15% (complex surface modeling — turbine blades, aerodynamic fai
 | Spline root faces misclassified as flanks | Through bore removed bore.floor, creating 16 horizontal faces at Z=20 | Check face normal Z-component (`nz > 0.9`) before spline flank classifier |
 | Fillet edge selector found no edges | `edge.Center()` on circular edges returns circle center (0,0,z), not circumference point | Use bounding box: `edge_r = (bb.xmax - bb.xmin) / 2` |
 | Counter display bug after chamfer | Indentation error in summary print loop | Labels were correct; only the summary was wrong |
+
+---
+
+## Session Log: Crankset Build
+
+Second extended session — building a real-world multi-feature part from a hand sketch, driven by iterative engineer instructions.
+
+### What was built
+
+**Track bike crankset** (drive-side crank, built from scratch iteratively):
+1. Spider disc with lenticular profile (revolved triangular cuts) → 7 faces
+2. Chainring pocket (annular shelf) → 9 faces
+3. 5-arm window cuts (constant-width arms) → 40 faces
+4. Spider inner corner fillets (5mm) → 50 faces
+5. Hub shortening + boss turn-down (40mm → 30mm) → 51 faces
+6. Hub boss fillets (3mm on both edges) → ~52 faces
+7. Pedal boss union + bolt holes + counterbores → ~70 faces
+8. Crank arm union (curved arc, pre-union 4mm fillets) → ~80 faces
+9. Pedal bore + axle bore + JIS square taper → 88 faces
+
+Final output: `crankset/crankset.step` (88 labeled faces) + `crankset/build_crankset.py` (persistent build script)
+
+### What worked
+
+**Machinist approach (stock → subtract).** Starting from a stock cylinder and removing material maps directly to CadQuery's boolean operations. Each feature is an isolated cut, easy to debug and reorder independently.
+
+**Incremental build-and-verify loop.** Adding one feature at a time with user visual verification caught geometry problems immediately. The hub turn-down cutting through the spider would have been much harder to diagnose in a monolithic build.
+
+**Pre-union fillets.** Filleting standalone solids before `union()` works around OCCT's inability to fillet union seam edges. The 4mm arm edge fillets and 3mm hub boss fillets both succeeded this way.
+
+**Face classification scaling.** The centroid + surface type approach scaled to 88 faces. Adding a new feature type typically required 2-5 lines of classifier code. BSplineSurface fallback handled the loft-generated taper walls.
+
+**Face labels as shared vocabulary.** Once faces were named, the user could give precise instructions like "add a fillet where hub.boss meets planar_z12" instead of ambiguous geometric descriptions.
+
+### What didn't work
+
+**Build order errors were the most common mistake.** The axle bore was placed before the crank arm union — the arm solid filled the bore back in. The pedal bore had the same issue earlier. **Rule: all cuts through shared volumes must go after all unions.** This is the single most important lesson.
+
+**Hub turn-down took three attempts.** Failed to trace the taper intersection math before writing cuts. First cut had OD too large (went through spider arms). Second cut had Z range too tall (went through spider web). Third attempt needed splitting into back-only. **Rule: compute `Z_taper(r)` at the cut boundaries before writing any code.**
+
+**No visual feedback is the biggest limitation.** Every geometry edit was a guess until user confirmation. Face counts catch added/removed faces but not shape errors. The hub turn-down especially — face count looked fine but the shape was wrong.
+
+**Boss fillets were a dead end.** Filleting the pedal boss before union produced 114 fragment faces from curved-on-curved boolean intersections. Multiple approaches tried (bore-first, selective edges, smaller radius) — all produced the same fragmentation. Accepted as an OCCT limitation.
+
+**Spatial reasoning errors are expensive.** Not understanding which volumes overlap led to most iteration. If a "what material exists at point (x,y,z)" query or cross-section render were available, most debugging would have been unnecessary.
+
+### Key patterns established
+
+| Pattern | When to use |
+|---------|------------|
+| Pre-union fillet | Need fillets on edges that will become union seams |
+| Cuts after all unions | Any bore/hole through regions that unions will fill |
+| Tangent avoidance (offset + 0.5mm) | Cut tool surface coincides with existing surface |
+| Z-limited annular cuts | Turning down a boss embedded in tapered structure |
+| BSplineSurface classifier fallback | Loft operations produce BSpline instead of expected types |
+| Edge selector by bounding box radius + Z | Selecting circular edges for fillets |
+
+### Errors encountered and resolved
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| Axle bore disappeared after arm union | Arm solid overlapped bore void, union filled it | Move bore cut to after all unions |
+| Pedal bore didn't cut through arm | Bore placed before arm union in build order | Move bore to after arm union |
+| Hub turn-down cut through spider web | Full-Z annular cut removed taper structure at r=15-20 | Split into back-only cut, Z-limited to boss protrusion zone |
+| Hub turn-down still clipped front taper | Front cut started at Z=18.5, taper meets hub at Z=19.4 | Removed front cut entirely (minimal protrusion) |
+| Fillet on union seam edges fails | OCCT BRep_API: command not done | Fillet standalone solid before union |
+| Boss fillet → 114 fragment faces | Curved torus + curved cylinder boolean intersection | Removed boss fillet; accepted as OCCT limitation |
+| Square taper faces classified as "?" | Loft created BSplineSurface, not GeomAbs_Plane | Added BSplineSurface case to classifier |
+| Axle bore not tall enough | Crank arm curves to Z≈22 at bore location, bore stopped at Z=22 | Extended bore to Z=32 (pedal_boss_z_face + 2) |
+| Changing hub_od from 40→30 broke spider fillets | 5mm fillet too large for new 30mm hub geometry | Keep hub_od=40, add separate turn-down cut instead |
