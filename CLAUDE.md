@@ -20,8 +20,9 @@ Each part directory contains a build script, STEP output, part spec, and session
 | `coffee_mug/` | 50 | Swept handle, full-round rim, junction fillets | [`PART_SPEC.md`](coffee_mug/PART_SPEC.md) |
 | `disc/` | 36 | 5-spoke, tapered profile, conical recess | [`PART_SPEC.md`](disc/PART_SPEC.md) |
 | `spoke_v2/` | 23 | 3-spoke, lenticular double-taper, hub arcs | [`PART_SPEC.md`](spoke_v2/PART_SPEC.md) |
+| `showerhead_tee/` | 28 | KF10 flanges, counterbores, fillets, cross bore | [`PART_SPEC.md`](showerhead_tee/PART_SPEC.md) |
 
-Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md) | [`spoke_v2/`](spoke_v2/SESSION_LOG.md)
+Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md) | [`spoke_v2/`](spoke_v2/SESSION_LOG.md) | [`showerhead_tee/`](showerhead_tee/SESSION_LOG.md)
 
 ## Build Script Convention
 
@@ -99,6 +100,9 @@ for face in result.faces().vals():
 - **`edge.Center()` on circles** returns the axis center, not a circumference point. Use bounding box: `r = (bb.xmax - bb.xmin) / 2`.
 - **Loft → BSplineSurface**, not Plane, even for geometrically planar results. Handle `GeomAbs_BSplineSurface` in classifiers.
 - **STEP continuation lines** (leading whitespace) must be joined to parent entities before parsing.
+
+### Workplane offset + extrude
+- **XZ/YZ workplane offset direction is inverted.** `.workplane(offset=N)` on XZ goes in -Y, not +Y. Negative `extrude()` mirrors through origin rather than reversing direction. **Workaround**: build geometry on XY, then `rotate()` + `translate()` to the target position.
 
 ### Sweep/extrusion
 - **Use `.sweep()` over extrusion** for features attached to curved bodies. Extrusion can silently produce a COMPOUND instead of a fused SOLID.
