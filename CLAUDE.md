@@ -19,8 +19,9 @@ Each part directory contains a build script, STEP output, part spec, and session
 | `crankset/` | 88 | 5-arm spider, hub boss, crank arm, JIS taper | [`PART_SPEC.md`](crankset/PART_SPEC.md) |
 | `coffee_mug/` | 50 | Swept handle, full-round rim, junction fillets | [`PART_SPEC.md`](coffee_mug/PART_SPEC.md) |
 | `disc/` | 36 | 5-spoke, tapered profile, conical recess | [`PART_SPEC.md`](disc/PART_SPEC.md) |
+| `spoke_v2/` | 23 | 3-spoke, lenticular double-taper, hub arcs | [`PART_SPEC.md`](spoke_v2/PART_SPEC.md) |
 
-Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md)
+Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md) | [`spoke_v2/`](spoke_v2/SESSION_LOG.md)
 
 ## Build Script Convention
 
