@@ -21,8 +21,9 @@ Each part directory contains a build script, STEP output, part spec, and session
 | `disc/` | 36 | 5-spoke, tapered profile, conical recess | [`PART_SPEC.md`](disc/PART_SPEC.md) |
 | `spoke_v2/` | 23 | 3-spoke, lenticular double-taper, hub arcs | [`PART_SPEC.md`](spoke_v2/PART_SPEC.md) |
 | `showerhead_tee/` | 28 | KF10 flanges, counterbores, fillets, cross bore | [`PART_SPEC.md`](showerhead_tee/PART_SPEC.md) |
+| `cross_assembly/` | 74 | **Assembly**: stepped-split clamp, cast fillets, bolt holes | [`PART_SPEC.md`](cross_assembly/PART_SPEC.md) |
 
-Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md) | [`spoke_v2/`](spoke_v2/SESSION_LOG.md) | [`showerhead_tee/`](showerhead_tee/SESSION_LOG.md)
+Session logs (what worked, what didn't, errors resolved): [`blkarc_slot/`](blkarc_slot/SESSION_LOG.md) | [`crankset/`](crankset/SESSION_LOG.md) | [`coffee_mug/`](coffee_mug/SESSION_LOG.md) | [`disc/`](disc/SESSION_LOG.md) | [`spoke_v2/`](spoke_v2/SESSION_LOG.md) | [`showerhead_tee/`](showerhead_tee/SESSION_LOG.md) | [`cross_assembly/`](cross_assembly/SESSION_LOG.md)
 
 ## Build Script Convention
 
@@ -51,6 +52,19 @@ if __name__ == "__main__":
 
 **When editing**, modify the build script and re-run — don't rebuild from scratch or edit STEP text unless the change is coordinate-only with no topology change.
 
+### Assembly builds
+
+For multi-body STEP files, use `cq.Assembly`:
+
+```python
+assy = cq.Assembly()
+assy.add(body_a, name="body_a")
+assy.add(body_b, name="body_b")
+assy.save(OUTPUT_PATH)
+```
+
+Each body gets its own CLOSED_SHELL in the STEP file. Face labeling iterates across all CLOSED_SHELLs in order. The `make_box(xmin, xmax, ymin, ymax, zmin, zmax)` helper is useful for boolean cutters — creates axis-aligned boxes from min/max coordinates via `.transformed(offset=center).box(dx, dy, dz)`.
+
 ## STEP Text Edit vs CadQuery Rebuild
 
 - **Text edit**: topology unchanged, just moving coordinates. Trace entities by ID through `ADVANCED_FACE → PLANE → AXIS2_PLACEMENT_3D → CARTESIAN_POINT`. Edit by entity ID, not text match.
@@ -75,7 +89,7 @@ for face in result.faces().vals():
     surface_type = surf.GetType()  # → classify by centroid + type
 ```
 
-**Classification strategies**: Planar → centroid Z/X/Y or normal direction. Cylindrical → `surf.Cylinder().Radius()`. Conical → chamfers. Toroidal → fillets. Same-type disambiguation → centroid position. Angled walls → `sin(θ)*cx + cos(θ)*cy`.
+**Classification strategies**: Planar → centroid Z/X/Y or normal direction. Cylindrical → `surf.Cylinder().Radius()` + `surf.Cylinder().Axis().Direction()` for bore vs bolt hole vs body. Conical → chamfers. Toroidal → fillets. Same-type disambiguation → centroid position. Angled walls → `sin(θ)*cx + cos(θ)*cy`.
 
 **CLOSED_SHELL** entity ordering in STEP corresponds 1:1 with `importStep().faces().vals()`. Parse CLOSED_SHELL for ADVANCED_FACE IDs, then regex-replace labels.
 
@@ -88,6 +102,8 @@ for face in result.faces().vals():
 - **Tangent surfaces hang the boolean kernel.** Offset the cut tool by ~0.5mm so it intersects rather than osculates, then clean up with a secondary cut.
 - **Booleans can split faces.** Count faces after each operation to verify.
 - **Z-limit annular cuts** near tapered structures. Compute `Z_taper(r)` at cut boundaries before writing code.
+- **L-shaped cutters via box union.** For stepped/complex splits, build each cutter as a union of two overlapping boxes (add ~0.1mm overlap at the transition seam to avoid coincident-face failures). Test that each resulting piece is 1 solid.
+- **Feature order for cast+machined parts:** fillet the raw block → cut bores → split → drill bolt holes. Filleting a simple box is reliable; cutting through filleted surfaces works fine.
 
 ### Fillets
 - **Pre-union fillet** works around "BRep_API: command not done" on union seam edges — fillet the standalone solid before union.
@@ -107,6 +123,18 @@ for face in result.faces().vals():
 ### Sweep/extrusion
 - **Use `.sweep()` over extrusion** for features attached to curved bodies. Extrusion can silently produce a COMPOUND instead of a fused SOLID.
 - **Coupled handle parameters**: verify attachment points remain outside the main arc (`distance > radius`) when adjusting geometry.
+
+## Design Patterns
+
+### Perpendicular bore clamping (stepped split)
+
+When two bores have skew axes (perpendicular and offset), no single plane can split both lengthwise. Solutions:
+- **Stepped split** (2 pieces): L-shaped parting surface transitions from one split plane to another. Each bore region gets the correct split. Halves interlock at diagonal quadrants. Pros: fewer pieces, shear resistance. Cons: complex parting surface.
+- **Parallel splits** (3 pieces): two separate planes, each normal to the bore-connecting axis, one at each bore center. Front cap + middle body + back cap. Pros: simple flat splits, easy to machine. Cons: extra piece, no interlocking.
+
+### Bolt clearance geometry
+
+For bolt holes near bores, check: `distance(bolt_center, bore_axis) - bore_radius - bolt_hole_radius > ~2mm`. Wall thickness must accommodate both bore and bolt with margin. With 5mm bore radius and M5 clearance (2.75mm radius), minimum wall ~10mm.
 
 ## Interpreting CAD Instructions
 
