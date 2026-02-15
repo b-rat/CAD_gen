@@ -1,6 +1,6 @@
 # Crankset
 
-Track bike drive-side crank — 5-arm spider with integrated crank arm, single piece. 88 faces total. Machinist approach (stock → subtract material).
+Track bike drive-side crank — 5-arm spider with integrated crank arm, single piece. 104 faces total. Machinist approach (stock → subtract material).
 
 ## Key Parameters
 
@@ -12,8 +12,9 @@ Track bike drive-side crank — 5-arm spider with integrated crank arm, single p
 | Hub height | 20mm | Z=0 (back) to Z=20 (front/chainring side) |
 | Spider thickness | 3mm | Lenticular profile, thick at hub, thin at rim |
 | Crank arm length | 165mm | Center-to-center, spindle to pedal |
-| Crank arm | 24mm wide, 10mm thick | Curved arc from spider to pedal boss |
-| Pedal boss | 27mm dia, 10mm thick | |
+| Crank arm | 24mm wide, 10mm thick, 4mm corner radii | Swept rounded-rectangle cross-section |
+| Pedal boss | 27mm dia, 10mm thick | 4mm OD fillets built into revolved profile |
+| Boss junction fillet | 8mm | Blending fillet where arm meets boss |
 | Axle bore | 20mm dia, 5mm deep blind hole | From front face |
 | Square taper | JIS, 12.65mm across flats, 2°/side | Wide end at back |
 | Bolt holes | 5x 10mm through, 12mm x 1mm counterbore | On 144mm BCD |
@@ -31,8 +32,7 @@ Track bike drive-side crank — 5-arm spider with integrated crank arm, single p
 5c. Hub shortening (back face moved to Z=5)
 5d. Hub boss turn-down (40mm → 30mm, back side only)
 5d2. Hub boss edge fillets (3mm, both Z=5 and Z=12 edges)
-6. Pedal boss union
-7. Crank arm union (with 4mm pre-union fillets on long edges)
+6+7+10. Crank arm (swept rounded-rect cross-section) + pedal boss (revolved profile with built-in 4mm OD fillets) + 8mm junction fillet
 8. Bolt holes + counterbores
 9. Pedal bore (after arm union to cut through all bodies)
 5e. Axle bore (after all unions so arm doesn't fill it back in)
@@ -55,9 +55,11 @@ Track bike drive-side crank — 5-arm spider with integrated crank arm, single p
 | `bolt.hole_NN` | 5 | Through-holes on BCD |
 | `bolt.cbore_NN` | 5 | Counterbore cylinders |
 | `bolt.cbore_floor_NN` | 5 | Counterbore floor faces |
-| `arm.top` / `arm.bottom` | 3/1 | Crank arm curved surfaces |
+| `arm.top` / `arm.bottom` | 3/1 | Crank arm curved surfaces (sweep) |
 | `arm.side_left` / `arm.side_right` | 2/2 | Crank arm side faces |
+| `arm.fillet_top_left` / `_right` / `_bot_left` / `_bot_right` | 4 | Swept arm corner rounds (SurfaceOfRevolution) |
 | `arm.root_NN` | ~5 | Hub/window junction arcs |
 | `pedal.face` / `pedal.back` / `pedal.boss` / `pedal.bore` | 1 each | Pedal boss features |
-| `fillet` | 6 | Toroidal fillet faces (arm + hub boss) |
+| `pedal.fillet` | 16 | Boss OD fillets + junction blending fillets |
+| `fillet` | 2 | Hub boss toroidal fillets |
 | `front` / `back` | 1/5 | Major planar faces |

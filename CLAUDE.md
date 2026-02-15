@@ -16,7 +16,7 @@ Each part directory contains a build script, STEP output, part spec, and session
 |------|-------|-------------|------|
 | `blkarc_slot/` | 10 | Arc top, angled slot | [`PART_SPEC.md`](blkarc_slot/PART_SPEC.md) |
 | `cylinder/` | 66 | Spline teeth, bore, chamfers, channels, fillets | — |
-| `crankset/` | 88 | 5-arm spider, hub boss, crank arm, JIS taper | [`PART_SPEC.md`](crankset/PART_SPEC.md) |
+| `crankset/` | 104 | 5-arm spider, hub boss, swept crank arm, pedal boss, JIS taper | [`PART_SPEC.md`](crankset/PART_SPEC.md) |
 | `coffee_mug/` | 50 | Swept handle, full-round rim, junction fillets | [`PART_SPEC.md`](coffee_mug/PART_SPEC.md) |
 | `disc/` | 36 | 5-spoke, tapered profile, conical recess | [`PART_SPEC.md`](disc/PART_SPEC.md) |
 | `spoke_v2/` | 23 | 3-spoke, lenticular double-taper, hub arcs | [`PART_SPEC.md`](spoke_v2/PART_SPEC.md) |
@@ -89,9 +89,11 @@ for face in result.faces().vals():
     surface_type = surf.GetType()  # → classify by centroid + type
 ```
 
-**Classification strategies**: Planar → centroid Z/X/Y or normal direction. Cylindrical → `surf.Cylinder().Radius()` + `surf.Cylinder().Axis().Direction()` for bore vs bolt hole vs body. Conical → chamfers. Toroidal → fillets. Same-type disambiguation → centroid position. Angled walls → `sin(θ)*cx + cos(θ)*cy`.
+**Classification strategies**: Planar → centroid Z/X/Y or normal direction. Cylindrical → `surf.Cylinder().Radius()` + `surf.Cylinder().Axis().Direction()` for bore vs bolt hole vs body. Conical → chamfers. Toroidal → fillets. SurfaceOfRevolution → swept cross-section corner rounds. Same-type disambiguation → centroid position. Angled walls → `sin(θ)*cx + cos(θ)*cy`.
 
 **CLOSED_SHELL** entity ordering in STEP corresponds 1:1 with `importStep().faces().vals()`. Parse CLOSED_SHELL for ADVANCED_FACE IDs, then regex-replace labels.
+
+**In-memory classification avoids face count mismatch.** OCCT STEP export/import round-trip can split faces, causing the reimported face count to differ from the in-memory solid. Pass the CQ result object to `classify_faces(solid)` instead of reimporting from the STEP file.
 
 **STEP naming**: `ADVANCED_FACE('feature.sub_face', ...)` — dot-separated hierarchy. Standalone faces use a single name.
 
@@ -110,7 +112,8 @@ for face in result.faces().vals():
 - **Union seam fillets CAN work** on smooth geometry (e.g., surface of revolution + sweep). Always try first; don't assume failure.
 - **Curved-on-curved fillet before union** produces 100+ fragment faces. Skip or accept the limitation.
 - **Full rounds**: build into the revolved cross-section as quarter-circle arcs rather than using fillet API.
-- **Rounded cross-section sweep** avoids fillet API for handle/bar edges entirely.
+- **Rounded cross-section sweep** avoids fillet API for handle/bar edges entirely. Build the cross-section as a rounded rectangle (quarter-circle arcs at corners), sweep along a path wire. The swept solid unions cleanly with other bodies — no COMPOUND issue.
+- **Pre-fillet + union → COMPOUND.** Filleting a solid (creating torus surfaces) before `union()` with an intersecting body can produce a COMPOUND (2 solids) instead of 1 fused solid. Bores then only cut one body. Fix: use rounded cross-section sweep instead of extrude+fillet, or fillet after union.
 
 ### OCC API
 - **`edge.Center()` on circles** returns the axis center, not a circumference point. Use bounding box: `r = (bb.xmax - bb.xmin) / 2`.
