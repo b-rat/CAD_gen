@@ -15,7 +15,7 @@ from OCP.BRepGProp import BRepGProp
 from OCP.GProp import GProp_GProps
 from OCP.GeomAbs import (
     GeomAbs_Plane, GeomAbs_Cylinder, GeomAbs_Cone,
-    GeomAbs_Torus, GeomAbs_BSplineSurface,
+    GeomAbs_Torus, GeomAbs_BSplineSurface, GeomAbs_SurfaceOfRevolution,
 )
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 
@@ -74,6 +74,9 @@ pedal_boss_r = pedal_boss_dia / 2.0
 pedal_boss_z_face = 30.0        # pedal interface face Z (30mm from chainring surface)
 pedal_boss_thickness = 10.0     # boss thickness in Z
 
+# Boss extension: protrude past arm in Z for sliver-free boolean union
+boss_z_ext_bot = 0.5            # mm below arm bottom (minimal, for clean boolean)
+
 # Pedal bore
 pedal_bore_dia = 0.4958 * 25.4  # 9/16"-20 minor diameter = 12.59mm
 pedal_bore_r = pedal_bore_dia / 2.0
@@ -81,6 +84,8 @@ pedal_bore_r = pedal_bore_dia / 2.0
 # Fillets
 fillet_arm_spider = 5.0         # spider-to-arm junction fillet
 fillet_arm_hub = 3.0            # arm-to-hub junction fillet
+fillet_boss_od = 4.0            # boss OD edge fillet (pedal face rim + backside)
+fillet_boss_junction = 8.0      # arm-to-boss blending fillet
 
 # Crank arm direction: arm #1 aligned with XZ plane (+X axis)
 crank_arm_angle = 0.0           # degrees from +X axis
@@ -288,18 +293,6 @@ def build_geometry():
 
     spider = spider.edges(HubBossEdgeSelector()).fillet(hub_boss_fillet_r)
 
-    # --- Step 6: Pedal boss ---
-    # Cylindrical boss at crank_length along arm #1 (+X direction).
-    # Pedal interface face at Z=pedal_boss_z_face.
-    pedal_boss = (
-        cq.Workplane("XY")
-        .workplane(offset=pedal_boss_z_face - pedal_boss_thickness)
-        .center(-crank_length, 0)
-        .circle(pedal_boss_r)
-        .extrude(pedal_boss_thickness)
-    )
-    spider = spider.union(pedal_boss)
-
     # --- Step 8: Bolt holes ---
     # 5x 10mm through-holes on 144mm BCD, one centered on each arm.
     # 12mm x 1mm counterbore on back surface for barrel nut.
@@ -328,10 +321,11 @@ def build_geometry():
         )
         spider = spider.cut(cbore)
 
-    # --- Step 7: Crank arm ---
-    # Curved arm connecting spider hub to pedal boss.
-    # Top surface tangent to boss face (horizontal at pedal end),
-    # curves down on a large radius to the spider front face.
+    # --- Step 6+7+10: Combined crank arm + pedal boss ---
+    # Arm built via sweep with rounded-rectangle cross-section (4mm corner
+    # radii) so arm long-edge fillets are part of the geometry — no fillet
+    # API needed. This avoids the OCCT bug where pre-filleting the arm
+    # produces a COMPOUND after union with the boss (bore only cuts one body).
     arm_x_inner = 10              # 10mm past hub center
     arm_x_outer = -crank_length   # pedal end (boss center)
 
@@ -341,55 +335,122 @@ def build_geometry():
     bot_z_out = top_z_out - crank_arm_thickness  # Z=20
 
     z_drop = top_z_out - top_z_in            # 10mm
-    span = abs(arm_x_outer - arm_x_inner)    # 145mm
+    span = abs(arm_x_outer - arm_x_inner)    # 175mm
 
     # Arc radius for tangent-to-horizontal at boss end
     R_arm = (span**2 + z_drop**2) / (2 * z_drop)
 
-    # Top arc: center directly below tangent point
+    # Arm centerline: midpoint between top and bottom surfaces
+    mid_z_in = (top_z_in + bot_z_in) / 2     # Z=15
+    mid_z_out = (top_z_out + bot_z_out) / 2   # Z=25
     top_arc_cz = top_z_out - R_arm
-    a0 = math.atan2(top_z_in - top_arc_cz, arm_x_inner - arm_x_outer)
-    a1 = math.atan2(top_z_out - top_arc_cz, 0)  # arm_x_outer - arm_x_outer = 0
-    a_mid = (a0 + a1) / 2
-    top_mid = (arm_x_outer + R_arm * math.cos(a_mid),
-               top_arc_cz + R_arm * math.sin(a_mid))
-
-    # Bottom arc: same geometry, shifted down by thickness
     bot_arc_cz = bot_z_out - R_arm
-    b0 = math.atan2(bot_z_out - bot_arc_cz, 0)
-    b1 = math.atan2(bot_z_in - bot_arc_cz, arm_x_inner - arm_x_outer)
-    b_mid = (b0 + b1) / 2
-    bot_mid = (arm_x_outer + R_arm * math.cos(b_mid),
-               bot_arc_cz + R_arm * math.sin(b_mid))
+    mid_arc_cz = (top_arc_cz + bot_arc_cz) / 2
 
-    crank_arm = (
+    # 3-point arc midpoint for centerline path
+    a0_m = math.atan2(mid_z_in - mid_arc_cz, arm_x_inner - arm_x_outer)
+    a1_m = math.atan2(mid_z_out - mid_arc_cz, 0)
+    a_mid_m = (a0_m + a1_m) / 2
+    mid_path_pt = (arm_x_outer + R_arm * math.cos(a_mid_m),
+                   mid_arc_cz + R_arm * math.sin(a_mid_m))
+
+    # Path wire for sweep
+    path_wire = (
         cq.Workplane("XZ")
-        .moveTo(arm_x_inner, top_z_in)
-        .threePointArc(top_mid, (arm_x_outer, top_z_out))
-        .lineTo(arm_x_outer, bot_z_out)
-        .threePointArc(bot_mid, (arm_x_inner, bot_z_in))
-        .close()
-        .extrude(crank_arm_width / 2, both=True)
+        .moveTo(arm_x_inner, mid_z_in)
+        .threePointArc(mid_path_pt, (arm_x_outer, mid_z_out))
+        .val()
     )
 
-    # --- Step 10: Arm edge fillets ---
-    # 4mm fillets on the 90-degree edges where arm sides meet top/bottom.
-    # Applied to standalone arm BEFORE union (OCCT can't fillet union seams).
+    # Rounded rectangle cross-section (24mm wide × 10mm tall, 4mm corner radii)
     arm_fillet_r = 4.0
+    w2 = crank_arm_width / 2        # 12mm half-width
+    h2 = crank_arm_thickness / 2    # 5mm half-height
+    c45 = arm_fillet_r * math.cos(math.radians(45))
+    s45 = arm_fillet_r * math.sin(math.radians(45))
 
-    class ArmLongEdgeSelector(cq.Selector):
+    crank_arm = (
+        cq.Workplane("YZ")
+        .workplane(offset=arm_x_inner)
+        .center(0, mid_z_in)
+        .moveTo(-w2 + arm_fillet_r, -h2)
+        .lineTo(w2 - arm_fillet_r, -h2)
+        .threePointArc((w2 - arm_fillet_r + c45, -h2 + arm_fillet_r - s45),
+                       (w2, -h2 + arm_fillet_r))
+        .lineTo(w2, h2 - arm_fillet_r)
+        .threePointArc((w2 - arm_fillet_r + c45, h2 - arm_fillet_r + s45),
+                       (w2 - arm_fillet_r, h2))
+        .lineTo(-w2 + arm_fillet_r, h2)
+        .threePointArc((-w2 + arm_fillet_r - c45, h2 - arm_fillet_r + s45),
+                       (-w2, h2 - arm_fillet_r))
+        .lineTo(-w2, -h2 + arm_fillet_r)
+        .threePointArc((-w2 + arm_fillet_r - c45, -h2 + arm_fillet_r - s45),
+                       (-w2 + arm_fillet_r, -h2))
+        .close()
+        .sweep(cq.Wire.assembleEdges([path_wire]), isFrenet=True)
+    )
+
+    # Pedal boss with both OD fillets built into the revolved profile.
+    # Quarter-circle arcs at top and bottom edges avoid the fillet API
+    # entirely (API fails because arm-boss intersection creates complex edges).
+    boss_bot_z = pedal_boss_z_face - pedal_boss_thickness - boss_z_ext_bot
+    fillet_r = fillet_boss_od  # 4mm radius for both top and bottom arcs
+
+    # Top fillet: transitions from cylinder (r=boss_r) to flat face (Z=boss_z_face)
+    top_fillet_start_z = pedal_boss_z_face - fillet_r       # Z=26
+    top_arc_cx = pedal_boss_r - fillet_r                    # r=9.5
+    top_arc_mid_r = top_arc_cx + fillet_r * math.cos(math.radians(45))
+    top_arc_mid_z = top_fillet_start_z + fillet_r * math.sin(math.radians(45))
+
+    # Bottom fillet: transitions from flat face (Z=boss_bot_z) to cylinder (r=boss_r)
+    bot_fillet_end_z = boss_bot_z + fillet_r                # Z=23.5
+    bot_arc_cx = pedal_boss_r - fillet_r                    # r=9.5
+    bot_arc_mid_r = bot_arc_cx + fillet_r * math.cos(math.radians(45))
+    bot_arc_mid_z = boss_bot_z + fillet_r - fillet_r * math.sin(math.radians(45))
+
+    pedal_boss = (
+        cq.Workplane("XZ")
+        .moveTo(0, boss_bot_z)
+        .lineTo(bot_arc_cx, boss_bot_z)
+        .threePointArc((bot_arc_mid_r, bot_arc_mid_z), (pedal_boss_r, bot_fillet_end_z))
+        .lineTo(pedal_boss_r, top_fillet_start_z)
+        .threePointArc((top_arc_mid_r, top_arc_mid_z), (top_arc_cx, pedal_boss_z_face))
+        .lineTo(0, pedal_boss_z_face)
+        .close()
+        .revolve(360, (0, 0), (0, 1))
+    )
+    pedal_boss = pedal_boss.translate((-crank_length, 0, 0))
+
+    # Union arm + boss. Swept arm (rounded cross-section) unions cleanly
+    # with boss as 1 solid — no COMPOUND issue.
+    crank_combined = crank_arm.union(pedal_boss)
+
+    # 2mm blending fillet where arm faces meet boss faces.
+    # Select junction edges: near boss center, skip boss's own circular edges.
+    boss_cx = -crank_length
+
+    class BossJunctionSelector(cq.Selector):
         def filter(self, objectList):
             out = []
             for obj in objectList:
-                c = obj.Center()
                 bb = obj.BoundingBox()
-                if (abs(abs(c.y) - crank_arm_width / 2) < 0.5
-                        and (bb.xmax - bb.xmin) > 30):
-                    out.append(obj)
+                c = obj.Center()
+                dist = math.sqrt((c.x - boss_cx)**2 + c.y**2)
+                if dist > pedal_boss_r + 3:
+                    continue
+                # Skip full circles (boss flat face edges, cylinder sections)
+                x_span = bb.xmax - bb.xmin
+                y_span = bb.ymax - bb.ymin
+                is_circle = (abs(x_span - y_span) < 1.0 and x_span > 10
+                             and abs(c.x - boss_cx) < 1.0)
+                if is_circle:
+                    continue
+                out.append(obj)
             return out
 
-    crank_arm = crank_arm.edges(ArmLongEdgeSelector()).fillet(arm_fillet_r)
-    spider = spider.union(crank_arm)
+    crank_combined = crank_combined.edges(BossJunctionSelector()).fillet(fillet_boss_junction)
+
+    spider = spider.union(crank_combined)
 
     # --- Step 9: Pedal bore ---
     # 9/16"-20 minor diameter through-hole at pedal boss center.
@@ -462,13 +523,14 @@ def _nearest_arm_index(angle_deg):
     return best
 
 
-def classify_faces(filepath):
+def classify_faces(solid):
     """Classify each face by OCC surface type + centroid position.
 
-    Extended incrementally as features are added.
+    Takes the in-memory CQ solid (not a filepath) so the face count
+    matches the STEP CLOSED_SHELL exactly. Re-importing from STEP can
+    split faces during the round-trip, causing count mismatches.
     """
-    result = cq.importers.importStep(filepath)
-    occ_faces = result.faces().vals()
+    occ_faces = solid.faces().vals()
 
     labels = []
     for face in occ_faces:
@@ -520,7 +582,9 @@ def classify_faces(filepath):
                 angle_deg = math.degrees(math.atan2(cy, cx)) % 360
                 arm_idx = _nearest_arm_index(angle_deg)
                 label = f"bolt.cbore_{arm_idx + 1:02d}"
-            elif abs(r - pedal_boss_r) < 0.5 and cx < -(crank_length - pedal_boss_r):
+            elif abs(r - fillet_boss_junction) < 0.5 and cx < -(crank_length - pedal_boss_r - 5):
+                label = "pedal.fillet"
+            elif abs(r - pedal_boss_r) < 1.0 and cx < -(crank_length - pedal_boss_r):
                 label = "pedal.boss"
             elif abs(r - pedal_bore_r) < 0.5:
                 label = "pedal.bore"
@@ -533,11 +597,30 @@ def classify_faces(filepath):
                 label = "spider.front_taper"
 
         elif stype == GeomAbs_Torus:
-            label = "fillet"
+            if cx < -(spider_od_r + 10):
+                label = "pedal.fillet"
+            else:
+                label = "fillet"
+
+        elif stype == GeomAbs_SurfaceOfRevolution:
+            # Swept arm corner rounds (rounded cross-section edges).
+            # Disambiguate top vs bottom by Z relative to arm midline.
+            _mid_z_in = hub_height - crank_arm_thickness / 2       # 15
+            _mid_z_out = pedal_boss_z_face - crank_arm_thickness / 2  # 25
+            _arm_x_in = 10
+            _arm_x_out = -crank_length
+            mid_z_at_cx = _mid_z_in + (_mid_z_out - _mid_z_in) * (_arm_x_in - cx) / (_arm_x_in - _arm_x_out)
+            if cz > mid_z_at_cx:
+                label = "arm.fillet_top_right" if cy > 0 else "arm.fillet_top_left"
+            else:
+                label = "arm.fillet_bot_right" if cy > 0 else "arm.fillet_bot_left"
 
         elif stype == GeomAbs_BSplineSurface:
+            # Boss junction fillet surfaces (near pedal boss)
+            if cx < -(spider_od_r + 10):
+                label = "pedal.fillet"
             # Loft creates BSpline for square taper walls
-            if r_centroid < taper_wide and abs(cz - 10) < 8:
+            elif r_centroid < taper_wide and abs(cz - 10) < 8:
                 if abs(cx) > abs(cy):
                     label = "axle.taper_xp" if cx > 0 else "axle.taper_xn"
                 else:
@@ -549,9 +632,10 @@ def classify_faces(filepath):
             if abs(nz) > 0.9:
                 # Pedal boss faces (far from center, near crank_length)
                 if cx < -(spider_od_r + 10):
+                    boss_back_z = pedal_boss_z_face - pedal_boss_thickness - boss_z_ext_bot
                     if abs(cz - pedal_boss_z_face) < 0.5:
                         label = "pedal.face"
-                    elif abs(cz - (pedal_boss_z_face - pedal_boss_thickness)) < 0.5:
+                    elif abs(cz - boss_back_z) < 0.5:
                         label = "pedal.back"
                     else:
                         label = f"pedal.planar_z{cz:.0f}"
@@ -653,7 +737,7 @@ if __name__ == "__main__":
     cq.exporters.export(result, OUTPUT_PATH)
 
     print("Classifying faces...")
-    labels = classify_faces(OUTPUT_PATH)
+    labels = classify_faces(result)
 
     print("Writing labels...")
     write_labels(OUTPUT_PATH, labels)
@@ -681,8 +765,7 @@ if __name__ == "__main__":
     if unlabeled:
         print(f"\n  WARNING: {len(unlabeled)} unlabeled faces")
         # Print details for debugging
-        result2 = cq.importers.importStep(OUTPUT_PATH)
-        occ_faces = result2.faces().vals()
+        occ_faces = result.faces().vals()
         for i, (face, lbl) in enumerate(zip(occ_faces, labels)):
             if lbl == "?":
                 props = GProp_GProps()
